@@ -3,7 +3,28 @@ entries:
   li9-s3-storage:
   - apiVersion: v2
     appVersion: 1.1.0-alpha.1
-    created: "2026-06-17T22:49:25.049391467Z"
+    created: "2026-06-17T22:53:49.697502074Z"
+    description: Li9 S3 Storage runtime and OpenShift bucket-consumption resources
+    digest: 5da98ccb7011bfc5c91d81962773a44a8ccce07bc33d1477fdc1997d270e7c7a
+    home: https://li9.com
+    keywords:
+    - s3
+    - object-storage
+    - openshift
+    maintainers:
+    - email: operators@li9.com
+      name: Li9 Operators Team
+    name: li9-s3-storage
+    sources:
+    - https://github.com/digital-iq/ocp-developers-s3_storage-code
+    - https://github.com/digital-iq/ocp-developers-s3_storage_li9_operators
+    type: application
+    urls:
+    - https://digital-iq.github.io/ocp-developers-s3_storage_li9_helmrepo/li9-s3-storage-1.1.0-alpha.3.tgz
+    version: 1.1.0-alpha.3
+  - apiVersion: v2
+    appVersion: 1.1.0-alpha.1
+    created: "2026-06-17T22:53:49.696468593Z"
     description: Li9 S3 Storage runtime and OpenShift bucket-consumption resources
     digest: e156e5b67903b37cc6d2d083b598cfe2fa9024a803cfe79df8d37c6afbd737e8
     home: https://li9.com
@@ -24,7 +45,7 @@ entries:
     version: 1.1.0-alpha.2
   - apiVersion: v2
     appVersion: 1.1.0-alpha.1
-    created: "2026-06-17T22:49:25.049011933Z"
+    created: "2026-06-17T22:53:49.695493858Z"
     description: Li9 S3 Storage runtime and OpenShift bucket-consumption resources
     digest: 0e8e86384438aaf9a2c6a1f31aba18dd179b8b62bf342d650aff49f566a953cb
     home: https://li9.com
@@ -43,4 +64,4 @@ entries:
     urls:
     - https://digital-iq.github.io/ocp-developers-s3_storage_li9_helmrepo/li9-s3-storage-1.1.0-alpha.1.tgz
     version: 1.1.0-alpha.1
-generated: "2026-06-17T22:49:25.048393018Z"
+generated: "2026-06-17T22:53:49.694163229Z"
