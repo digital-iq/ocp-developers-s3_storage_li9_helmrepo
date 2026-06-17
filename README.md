@@ -15,7 +15,7 @@ Install the chart:
 helm upgrade --install li9-s3 li9-s3-storage/li9-s3-storage \
   --namespace li9-s3 \
   --create-namespace \
-  --version 1.1.0-alpha.1 \
+  --version 1.1.0-alpha.3 \
   --set gateway.host=s3-gateway-li9-s3.apps.example.com
 ```
 
