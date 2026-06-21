@@ -1,0 +1,218 @@
+name: Li9 S3 Helm Pages Repository CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_ocp_e2e:
+        description: Install the published Pages chart into OpenShift and run AWS CLI E2E
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      chart_version:
+        description: Chart version to test from this Helm repository. Defaults to latest index entry.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  validate-helm-repository:
+    runs-on: ephemeral-runner
+    container:
+      image: quay.io/operator-framework/operator-sdk:v1.42.2
+    steps:
+      - name: Install CI dependencies
+        shell: sh
+        run: |
+          set -eu
+          microdnf install -y bash git python3 python3-pyyaml tar gzip findutils diffutils
+          microdnf clean all
+
+      - name: Checkout Helm Pages repository
+        uses: actions/checkout@v5
+
+      - name: Install OpenShift client and Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -sSLo /tmp/openshift-client-linux.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.20/openshift-client-linux.tar.gz
+          tar -C /tmp -xzf /tmp/openshift-client-linux.tar.gz oc kubectl
+          mv /tmp/oc /tmp/kubectl "$HOME/bin/"
+          chmod +x "$HOME/bin/oc" "$HOME/bin/kubectl"
+          rm -rf /tmp/helm-extract
+          mkdir -p /tmp/helm-extract
+          for attempt in 1 2 3 4 5; do
+            if "$HOME/bin/oc" image extract --filter-by-os=linux/amd64 \
+              docker.io/alpine/helm:3.19.0 \
+              --path=/usr/bin/helm:/tmp/helm-extract \
+              --confirm; then
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          helm_bin="$(find /tmp/helm-extract -type f -name helm | head -n1)"
+          test -n "${helm_bin}"
+          mv "${helm_bin}" "$HOME/bin/helm"
+          chmod +x "$HOME/bin/helm"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          helm version
+
+      - name: Validate index and chart packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+          import yaml
+
+          root = pathlib.Path(".")
+          index_path = root / "index.yaml"
+          index_text = index_path.read_text(encoding="utf-8")
+          if "avishnia" in index_text.lower():
+              raise SystemExit("index.yaml must not contain legacy avishnia naming")
+
+          index = yaml.safe_load(index_text)
+          entries = index.get("entries", {}).get("li9-s3-storage", [])
+          if not entries:
+              raise SystemExit("index.yaml does not contain li9-s3-storage entries")
+
+          seen_versions = set()
+          for entry in entries:
+              version = entry.get("version")
+              urls = entry.get("urls") or []
+              digest = entry.get("digest")
+              if not version or version in seen_versions:
+                  raise SystemExit(f"duplicate or empty chart version in index: {version!r}")
+              seen_versions.add(version)
+              if len(urls) != 1:
+                  raise SystemExit(f"chart {version} must have exactly one URL")
+              package = root / pathlib.Path(urls[0]).name
+              if not package.is_file():
+                  raise SystemExit(f"chart package listed in index is missing: {package}")
+              actual_digest = hashlib.sha256(package.read_bytes()).hexdigest()
+              if digest != actual_digest:
+                  raise SystemExit(f"digest mismatch for {package}: index={digest} actual={actual_digest}")
+
+          print(f"validated {len(entries)} li9-s3-storage chart package(s)")
+          PY
+
+          for package in li9-s3-storage-*.tgz; do
+            version="$(helm show chart "${package}" | awk '/^version:/{print $2; exit}')"
+            grep -q "version: ${version}" index.yaml
+            helm show values "${package}" >/dev/null
+          done
+
+      - name: Validate repository is consumable by Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m http.server 18080 --bind 127.0.0.1 >/tmp/li9-s3-helmrepo-http.log 2>&1 &
+          server_pid="$!"
+          trap 'kill "${server_pid}" >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5; do
+            if curl -fsS http://127.0.0.1:18080/index.yaml >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          helm repo add li9-s3-storage-local http://127.0.0.1:18080
+          helm repo update
+          helm search repo li9-s3-storage-local/li9-s3-storage --versions --devel
+          latest_version="$(helm search repo li9-s3-storage-local/li9-s3-storage --versions --devel -o json \
+            | python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0]["version"] if rows else "")')"
+          test -n "${latest_version}"
+          helm pull li9-s3-storage-local/li9-s3-storage --version "${latest_version}" --destination /tmp
+          test -s "/tmp/li9-s3-storage-${latest_version}.tgz"
+
+  openshift-pages-e2e:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_ocp_e2e == 'true')
+    runs-on: ephemeral-runner
+    container:
+      image: quay.io/operator-framework/operator-sdk:v1.42.2
+    needs:
+      - validate-helm-repository
+    steps:
+      - name: Install CI dependencies
+        shell: sh
+        run: |
+          set -eu
+          microdnf install -y bash git python3 python3-pyyaml tar gzip findutils diffutils
+          microdnf clean all
+
+      - name: Checkout Helm Pages repository
+        uses: actions/checkout@v5
+
+      - name: Checkout Helm chart test suite
+        uses: actions/checkout@v5
+        with:
+          repository: digital-iq/ocp-developers-s3_storage_li9_helmchart
+          path: _source/ocp-developers-s3_storage_li9_helmchart
+          token: ${{ secrets.HELM_PAGES_TOKEN || github.token }}
+
+      - name: Install OpenShift client and Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/bin"
+          curl -sSLo /tmp/openshift-client-linux.tar.gz https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-4.20/openshift-client-linux.tar.gz
+          tar -C /tmp -xzf /tmp/openshift-client-linux.tar.gz oc kubectl
+          mv /tmp/oc /tmp/kubectl "$HOME/bin/"
+          chmod +x "$HOME/bin/oc" "$HOME/bin/kubectl"
+          rm -rf /tmp/helm-extract
+          mkdir -p /tmp/helm-extract
+          for attempt in 1 2 3 4 5; do
+            if "$HOME/bin/oc" image extract --filter-by-os=linux/amd64 \
+              docker.io/alpine/helm:3.19.0 \
+              --path=/usr/bin/helm:/tmp/helm-extract \
+              --confirm; then
+              break
+            fi
+            if [ "${attempt}" -eq 5 ]; then
+              exit 1
+            fi
+            sleep "$((attempt * 5))"
+          done
+          helm_bin="$(find /tmp/helm-extract -type f -name helm | head -n1)"
+          test -n "${helm_bin}"
+          mv "${helm_bin}" "$HOME/bin/helm"
+          chmod +x "$HOME/bin/helm"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+          helm version
+
+      - name: Run published Helm repository OpenShift E2E
+        env:
+          OCP_API_URL: ${{ secrets.OCP_API_URL }}
+          OCP_TOKEN: ${{ secrets.OCP_TOKEN }}
+          QUAY_ROBOT_USERNAME: ${{ secrets.QUAY_ROBOT_USERNAME }}
+          QUAY_ROBOT_TOKEN: ${{ secrets.QUAY_ROBOT_TOKEN }}
+          CHART_VERSION: ${{ github.event.inputs.chart_version || '' }}
+          RWX_STORAGE_CLASS: ocs-storagecluster-cephfs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${CHART_VERSION}" ]; then
+            CHART_VERSION="$(python3 - <<'PY'
+          import yaml
+          with open("index.yaml", encoding="utf-8") as fh:
+              index = yaml.safe_load(fh)
+          print(index["entries"]["li9-s3-storage"][0]["version"])
+          PY
+          )"
+          fi
+          export CHART_VERSION
+          cd _source/ocp-developers-s3_storage_li9_helmchart
+          ./ci/openshift-helm-pages-e2e.sh
