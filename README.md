@@ -25,3 +25,41 @@ pipeline. Do not edit chart packages or `index.yaml` by hand.
 CI validates that `index.yaml` matches every packaged chart digest, that Helm
 can consume the repository, and on `main` runs the published Pages chart through
 the OpenShift install/AWS CLI/uninstall E2E suite from the Helm chart repo.
+
+## Pipeline Flow
+
+`.github/workflows/ci.yaml` is the source of truth for the public Helm Pages
+repository pipeline. It runs on the OpenShift ARC `ephemeral-runner`.
+
+Pipeline triggers:
+
+- `pull_request`: repository validation only; no OpenShift E2E.
+- `push` to `main`: validate the repository and run OpenShift E2E.
+- `workflow_dispatch`: validate the repository; OpenShift E2E runs by default
+  and can be disabled with `run_ocp_e2e=false`.
+
+Required secrets for OpenShift E2E:
+
+- `OCP_API_URL`
+- `OCP_TOKEN`
+- `QUAY_ROBOT_USERNAME`
+- `QUAY_ROBOT_TOKEN`
+- `HELM_PAGES_TOKEN` when the workflow needs to check out the chart test suite
+  from a private repository.
+
+Pipeline flow:
+
+1. `validate-helm-repository` parses `index.yaml`, verifies every chart package
+   listed in the index exists, compares SHA-256 digests, rejects legacy naming,
+   starts a local HTTP server, adds the repository through `helm repo add`, and
+   confirms Helm can search and pull the latest package.
+2. `openshift-pages-e2e` checks out the Helm chart test suite, installs the
+   selected chart version from this repository into OpenShift, runs the AWS CLI
+   compatibility E2E suite, and removes the temporary Helm releases and
+   namespaces.
+
+Pipeline outputs:
+
+- validation proof that `index.yaml` and packaged chart digests match;
+- OpenShift E2E proof that a user can install the public Helm repository chart
+  without using a local checkout.
