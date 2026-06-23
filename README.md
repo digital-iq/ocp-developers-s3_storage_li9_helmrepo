@@ -38,6 +38,11 @@ Pipeline triggers:
 - `workflow_dispatch`: validate the repository; OpenShift E2E runs by default
   and can be disabled with `run_ocp_e2e=false`.
 
+Documentation-only changes are intentionally cheap. If the diff contains only
+`README.md`, Markdown files, or `docs/**`, the workflow skips repository
+validation and OpenShift E2E. Generated chart package and `index.yaml` commits
+still run the full repository validation path.
+
 Required secrets for OpenShift E2E:
 
 - `OCP_API_URL`
